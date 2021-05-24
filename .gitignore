@@ -1,0 +1,8 @@
+data/
+imagenet.zip
+imagnetsmall/
+model/params/
+model/data/
+bins/
+bitstreams/
+.vscode/
