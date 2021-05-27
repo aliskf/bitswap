@@ -104,7 +104,7 @@ def compress(quantbits, nz, bitswap, gpu):
 
     # <=== MODEL ===>
     model = Model(xs = (3, 32, 32), nz=nz, zchannels=8, nprocessing=4, kernel_size=3, resdepth=8, reswidth=reswidth,
-    in_channels = 3, embedding_dim = 32, num_embeddings = 512).to(device)
+    in_channels = 3, embedding_dim = 64, num_embeddings = 256).to(device)
     model.load_state_dict(
         torch.load(f'model/params/cifar/nz{nz}',
                    map_location=lambda storage, location: storage
@@ -169,8 +169,8 @@ def compress(quantbits, nz, bitswap, gpu):
             # calculate ELBO
             with torch.no_grad():
                 model.compress(False)
-                logrecon, logdec, logenc, _ , _ = model.loss(x.view((-1,) + model.xs))
-                elbo = -logrecon + torch.sum(-logdec + logenc)
+                logrecon, logdec, logenc, _ , logvq = model.loss(x.view((-1,) + model.xs))
+                elbo = -logrecon -logvq + torch.sum(-logdec + logenc)
                 model.compress(True)
 
             if bitswap:
@@ -180,6 +180,7 @@ def compress(quantbits, nz, bitswap, gpu):
                     # inference model
                     input = zcentres[zi - 1, zrange, zsym] if zi > 0 else xcentres[xrange, x.long()]
                     mu, scale = model.infer(zi)(given=input)
+                    mu, _ = model.vector(zi)(given=mu)
                     cdfs = logistic_cdf(zendpoints[zi].t(), mu, scale).t()# most expensive calculation?
                     pmfs = cdfs[:, 1:] - cdfs[:, :-1]
                     pmfs = torch.cat((cdfs[:,0].unsqueeze(1), pmfs, 1. - cdfs[:,-1].unsqueeze(1)), dim=1)
@@ -194,6 +195,8 @@ def compress(quantbits, nz, bitswap, gpu):
 
                     # generative model
                     z = zcentres[zi, zrange, zsymtop]
+                    #mu, _ = model.vector(zi)(given=mu)
+                    #mu, _ = model.vector(zi)(given=z)
                     mu, scale = model.generate(zi)(given=z)
                     cdfs = logistic_cdf((zendpoints[zi - 1] if zi > 0 else xendpoints).t(), mu, scale).t() # most expensive calculation?
                     pmfs = cdfs[:, 1:] - cdfs[:, :-1]
@@ -295,7 +298,9 @@ def compress(quantbits, nz, bitswap, gpu):
                 for zi in reversed(range(nz)):
                     # generative model
                     z = zcentres[zi, zrange, zsymtop]
+                    #z, _ = model.vector(zi)(given=z)
                     mu, scale = model.generate(zi)(given=z)
+                    #mu, _ = model.vector(zi)(given=mu)
                     cdfs = logistic_cdf((zendpoints[zi - 1] if zi > 0 else xendpoints).t(), mu, scale).t() # most expensive calculation?
                     pmfs = cdfs[:, 1:] - cdfs[:, :-1]
                     pmfs = torch.cat((cdfs[:, 0].unsqueeze(1), pmfs, 1. - cdfs[:, -1].unsqueeze(1)), dim=1)
@@ -305,7 +310,11 @@ def compress(quantbits, nz, bitswap, gpu):
 
                     # inference model
                     input = zcentres[zi - 1, zrange, sym] if zi > 0 else xcentres[xrange, sym]
+
+
+                    mu, _ = model.vector(zi)(given=input)
                     mu, scale = model.infer(zi)(given=input)
+                    #mu, _ = model.vector(zi)(given=mu)
                     cdfs = logistic_cdf(zendpoints[zi].t(), mu, scale).t() # most expensive calculation?
                     pmfs = cdfs[:, 1:] - cdfs[:, :-1]
                     pmfs = torch.cat((cdfs[:, 0].unsqueeze(1), pmfs, 1. - cdfs[:, -1].unsqueeze(1)), dim=1)

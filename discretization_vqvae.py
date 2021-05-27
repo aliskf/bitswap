@@ -34,13 +34,13 @@ def discretize(nz, quantbits, type, device, model, dataset):
             # get the train-sets of the corresponding datasets
             if dataset == "cifar":
                 transform_ops = transforms.Compose([transforms.ToTensor(), ToInt()])
-                train_set = datasets.CIFAR10(root="model/data/cifar", train=True, transform=transform_ops, download=True)
+                train_set = datasets.CIFAR10(root="data/cifar", train=True, transform=transform_ops, download=True)
             elif dataset == "imagenet" or dataset == "imagenetcrop":
                 transform_ops = transforms.Compose([transforms.ToTensor(), ToInt()])
-                train_set = modules.ImageNet(root='model/data/imagenet/train', file='train.npy', transform=transform_ops)
+                train_set = modules.ImageNet(root='data/imagenet/train', file='train.npy', transform=transform_ops)
             else:
                 transform_ops = transforms.Compose([transforms.Pad(2), transforms.ToTensor(), ToInt()])
-                train_set = datasets.MNIST(root="model/data/mnist", train=True, transform=transform_ops, download=True)
+                train_set = datasets.MNIST(root="data/mnist", train=True, transform=transform_ops, download=True)
 
             # set-up a batch-loader for the dataset
             train_loader = DataLoader(
@@ -66,7 +66,9 @@ def discretize(nz, quantbits, type, device, model, dataset):
                 # obtain samples from the generative model
                 iterator = tqdm(range(batches), desc=f"sampling z{zi} from gen")
                 for bi in iterator:
+                    #mu, _ = model.vector(zi)(given=torch.from_numpy(gen_samples[zi][bi * bs: bi * bs + bs]).to(device).float())
                     mu, scale = model.generate(zi)(given=torch.from_numpy(gen_samples[zi][bi * bs: bi * bs + bs]).to(device).float())
+                    gen_samples[zi - 1][bi * bs: bi * bs + bs] = transform(logistic_eps(mu.shape, device=device, bound=1e-30), mu, scale).to("cpu")
                     gen_samples[zi - 1][bi * bs: bi * bs + bs] = transform(logistic_eps(mu.shape, device=device, bound=1e-30), mu, scale).to("cpu")
 
                 # obtain samples from the inference model (using the dataset)

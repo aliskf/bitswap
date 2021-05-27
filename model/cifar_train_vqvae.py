@@ -455,9 +455,55 @@ class Model(nn.Module):
             return mu, scale
 
         return distribution
-    
 
-    def vector(self,i): 
+
+    '''def vector(self,i):
+        def distribution(given):
+            h = given
+
+            # if compressing, the input might not be float32, so we'll have to convert it first
+            if self.compressing:
+                type = h.type()
+                h = h.float()
+                h = h.view((-1,) + self.zdim)
+            # bottom latent layer
+            if i == 0:
+                # if compressing, the input is flattened, so we'll have to convert it back to a Tensor
+
+
+                # input convolution
+                mu ,vq_loss= self.vq_layer(h)
+
+                # scale parameter of the conditional Logistic distribution
+                # clamp the output of the scale parameter between [0.1, 1.0] for stability
+                #scale = 0.1 + 0.9 * self.sigmoid(self.infer_std(h) + 2.)
+
+            # deeper latent layers
+            else:
+                # if compressing, the input is flattened, so we'll have to convert it back to a Tensor
+
+
+                # input convolution
+                mu ,vq_loss= self.deepvq_layer[i - 1](h)
+
+
+                #scale = 0.1 + 0.9 * self.sigmoid(self.deepinfer_std[i - 1](h) + 2.)
+
+            if self.compressing:
+                # if compressing, the "batch-size" can only be 1
+                assert mu.shape[0] == 1
+
+                # flatten the Tensors back and convert back to the input datatype
+                mu = mu.view(np.prod(self.zdim)).type(type)
+                #scale = scale.view(np.prod(self.zdim)).type(type)
+            return mu, vq_loss
+
+        return distribution'''
+
+
+    def vector(self, i):
+        # nested function that takes in the "given" value of the conditional Logistic distribution
+        # and returns the mu and scale parameters of that distribution
         def distribution(given):
             h = given
 
@@ -470,7 +516,7 @@ class Model(nn.Module):
             if i == 0:
                 # if compressing, the input is flattened, so we'll have to convert it back to a Tensor
                 if self.compressing:
-                    h = h.view((-1,) + self.xs)
+                    h = h.view((-1,) + self.zdim)
                 # also, when NOT compressing, the input is not scaled from [0,255] to [-1,1]
                 else:
                     h = (h - 127.5) / 127.5
@@ -491,24 +537,22 @@ class Model(nn.Module):
                 # input convolution
                 mu ,vq_loss= self.deepvq_layer[i - 1](h)
 
-                
+                # scale parameter of the conditional Logistic distribution
+                # clamp the output of the scale parameter between [0.1, 1.0] for stability
                 #scale = 0.1 + 0.9 * self.sigmoid(self.deepinfer_std[i - 1](h) + 2.)
 
-            #if self.compressing:
+            if self.compressing:
                 # if compressing, the "batch-size" can only be 1
-                #assert mu.shape[0] == 1
+                assert mu.shape[0] == 1
 
                 # flatten the Tensors back and convert back to the input datatype
-                #mu = mu.view(np.prod(self.zdim)).type(type)
+                mu = mu.view(np.prod(self.zdim)).type(type)
                 #scale = scale.view(np.prod(self.zdim)).type(type)
-            return mu, vq_loss
+            return mu,vq_loss
 
         return distribution
 
 
-
-
-    
     '''def vector(self,i):
 
         def distribution(given):
@@ -529,7 +573,7 @@ class Model(nn.Module):
     '''def vector(self,distribution):
 
         h = distribution
-        
+
         if self.compressing:
             type = h.type()
             h = h.float()
@@ -542,7 +586,7 @@ class Model(nn.Module):
         h ,vq_loss= self.vq_layer(h)
 
         return h,vq_loss'''
-        
+
 
     # function that only takes in the layer number and returns a distribution based on that
     def generate(self, i):
@@ -610,7 +654,7 @@ class Model(nn.Module):
 
         # tensor to store the generative model losses
         logdec = torch.zeros((self.nz, x.shape[0], self.zdim[0]), device=x.device)
-        
+
         # tensor to store the vq model losses
         logvq = torch.zeros((self.nz, x.shape[0], self.zdim[0]), device=x.device)
 
@@ -621,11 +665,13 @@ class Model(nn.Module):
             # inference model
             # get the parameters of inference distribution i given x (if i == 0) or z (otherwise)
             mu, scale = self.infer(i)(given=x if i == 0 else z)
-            
+
 
             # sample untransformed sample from Logistic distribution (mu=0, scale=1)
             eps = random.logistic_eps(mu.shape, device=mu.device)
             # reparameterization trick: transform using obtained parameters
+            mu, logvq = self.vector(i)(given=mu if i == 0 else z_next)
+            #mu, vq_loss = self.vector(mu)
             z_next = random.transform(eps, mu, scale)
 
             # store the inference model loss
@@ -636,9 +682,9 @@ class Model(nn.Module):
             #eps = random.logistic_eps(mu.shape, device=mu.device)
             # reparameterization trick: transform using obtained parameters
             #z_next = random.transform(eps, mu, scale)
-            mu, logvq = self.vector(i)(given=mu if i == 0 else z_next)
+            #mu, logvq = self.vector(i)(given=mu if i == 0 else z_next)
             #mu, vq_loss = self.vector(mu)
-            #mu, vq_loss = self.vq_layer(mu)            
+            #mu, vq_loss = self.vq_layer(mu)
             # generative model
             # get the parameters of inference distribution i given z
             mu, scale = self.generate(i)(given=z_next)
@@ -708,6 +754,8 @@ class Model(nn.Module):
         #mu, vq_loss = self.vector(mu)
 
         eps = random.logistic_eps(mu.shape, device=device)
+        #mu, logvq = self.vector(0)(given=mu)
+        #mu, vq_loss = self.vector(mu)
         z = random.transform(eps, mu, scale)  # sample zs
 
         # sample from the bottom (zi = 1) generative model
@@ -763,13 +811,13 @@ def warmup(model, device, data_loader, warmup_batches, root_process):
         logenc = torch.sum(logenc, dim=1)
         logvq = torch.sum(logvq, dim=-1)
 
-        elbo = -logrecon + torch.sum(-logdec + logenc)
+        elbo = -logrecon - logvq + torch.sum(-logdec + logenc)
 
         elbo = elbo.detach().cpu().numpy() * model.perdimsscale
         entrecon = -logrecon.detach().cpu().numpy() * model.perdimsscale
         entdec = -logdec.detach().cpu().numpy() * model.perdimsscale
         entenc = -logenc.detach().cpu().numpy() * model.perdimsscale
-        entvq = -logvq.detach().cpu().numpy() * model.perdimsscale 
+        entvq = -logvq.detach().cpu().numpy() * model.perdimsscale
         kl = entdec - entenc
 
         print(f'====> Epoch: {0} Average loss: {elbo:.4f}')
@@ -801,8 +849,8 @@ def train(model, device, epoch, data_loader, optimizer, ema, log_interval, root_
     if root_process:
         elbos = torch.zeros((nbatches), device=device)
         logrecons = torch.zeros((nbatches), device=device)
-        logvqs = torch.zeros((nbatches), device=device) 
-        logvqsz = torch.zeros((nbatches, model.nz), device=device) 
+        logvqs = torch.zeros((nbatches), device=device)
+        logvqsz = torch.zeros((nbatches, model.nz), device=device)
         logdecs = torch.zeros((nbatches, model.nz), device=device)
         logencs = torch.zeros((nbatches, model.nz), device=device)
 
@@ -843,12 +891,12 @@ def train(model, device, epoch, data_loader, optimizer, ema, log_interval, root_
         logvq = torch.sum(logvq, dim=0)
 
         # construct ELBO
-        elbo = -logrecon + kl + logvq
+        elbo = -logrecon + kl - logvq
 
         # scale by image dimensions to get "bits/dim"
         elbo *= model.perdimsscale
         logrecon *= model.perdimsscale
-        logvq *= model.perdimsscale 
+        logvq *= model.perdimsscale
         logdec *= model.perdimsscale
         logenc *= model.perdimsscale
 
@@ -960,7 +1008,7 @@ def test(model, device, epoch, ema, data_loader, tag, root_process):
             logrecon, logdec, logenc, _ , logvq = model.loss(data)
 
             # construct the ELBO
-            elbo = -logrecon + torch.sum(-logdec + logenc)
+            elbo = -logrecon -logvq + torch.sum(-logdec + logenc)
 
             # compute the inference- and generative-model loss
             logdec = torch.sum(logdec, dim=1)
@@ -999,7 +1047,7 @@ def test(model, device, epoch, ema, data_loader, tag, root_process):
 
         # log to Tensorboard
         model.logger.add_scalar('x/reconstruction/test', entrecon, epoch)
-        model.logger.add_scalar('x/vq/test', entvq, epoch) 
+        model.logger.add_scalar('x/vq/test', entvq, epoch)
         for i in range(1, logdec.shape[0] + 1):
             model.logger.add_scalar(f'z{i}/encoder/test', entenc[i - 1], epoch)
             model.logger.add_scalar(f'z{i}/decoder/test', entdec[i - 1], epoch)
@@ -1062,8 +1110,8 @@ if __name__ == '__main__':
     nz = args.nz
     zchannels = args.zchannels
     in_channels = 3
-    embedding_dim = 32
-    num_embeddings = 512
+    embedding_dim = 64
+    num_embeddings = 256
     img_size = 32
     nprocessing = args.nprocessing
     gpu = args.gpu
@@ -1123,7 +1171,7 @@ if __name__ == '__main__':
 
     # set data pre-processing transforms
     transform_ops = transforms.Compose([transforms.ToTensor(), ToInt()])
-    
+
     # store CIFAR data shape
     xs = (3, 32, 32)
 

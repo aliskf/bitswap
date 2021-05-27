@@ -470,7 +470,7 @@ class Model(nn.Module):
             if i == 0:
                 # if compressing, the input is flattened, so we'll have to convert it back to a Tensor
                 if self.compressing:
-                    h = h.view((-1,) + self.xs)
+                    h = h.view((-1,) + self.zdim)
                 # also, when NOT compressing, the input is not scaled from [0,255] to [-1,1]
                 else:
                     h = (h - 127.5) / 127.5
@@ -621,14 +621,7 @@ class Model(nn.Module):
             # inference model
             # get the parameters of inference distribution i given x (if i == 0) or z (otherwise)
             mu, scale = self.infer(i)(given=x if i == 0 else z)
-            #mu = mu[0]
-            eps = random.logistic_eps(mu.shape, device=mu.device)
-            # reparameterization trick: transform using obtained parameters
-            z_next = random.transform(eps, mu, scale)
-            mu, logvq = self.vector(i)(given=mu if i == 0 else z_next)
-            #mu, vq_loss = self.vector(mu)
-            #mu, vq_loss = self.vq_layer(mu)
-
+            
 
             # sample untransformed sample from Logistic distribution (mu=0, scale=1)
             eps = random.logistic_eps(mu.shape, device=mu.device)
@@ -640,6 +633,13 @@ class Model(nn.Module):
             logq = torch.sum(random.logistic_logp(mu, scale, z_next), dim=2)
             logenc[i] += logq
 
+            #mu = mu[0]
+            #eps = random.logistic_eps(mu.shape, device=mu.device)
+            # reparameterization trick: transform using obtained parameters
+            #z_next = random.transform(eps, mu, scale)
+            mu, logvq = self.vector(i)(given=mu if i == 0 else z_next)
+            #mu, vq_loss = self.vector(mu)
+            #mu, vq_loss = self.vq_layer(mu)
             # generative model
             # get the parameters of inference distribution i given z
             mu, scale = self.generate(i)(given=z_next)
@@ -763,7 +763,7 @@ def warmup(model, device, data_loader, warmup_batches, root_process):
         logenc = torch.sum(logenc, dim=1)
         logvq = torch.sum(logvq, dim=-1)
 
-        elbo = -logrecon + torch.sum(-logdec + logenc)
+        elbo = -logrecon +logvq + torch.sum(-logdec + logenc)
 
         elbo = elbo.detach().cpu().numpy() * model.perdimsscale
         entrecon = -logrecon.detach().cpu().numpy() * model.perdimsscale
@@ -1046,7 +1046,7 @@ if __name__ == '__main__':
     parser.add_argument('--kernel', default=3, type=int, help="size of the convolutional filter (kernel) in the ResNet blocks")
     parser.add_argument('--batch', default=386, type=int, help="size of the mini-batch for gradient descent")
     parser.add_argument('--dist', default=0, type=int, help="distribute (1) over different gpu's and use Horovod to do so, or not (0)")
-    parser.add_argument('--lr', default=2e-4, type=float, help="learning rate gradient descent")
+    parser.add_argument('--lr', default=2e-3, type=float, help="learning rate gradient descent")
     parser.add_argument('--schedule', default=1, type=float, help="learning rate schedule: yes (1) or no (0)")
     parser.add_argument('--decay', default=0.999995, type=float, help="decay of the learning rate when using learning rate schedule")
 
