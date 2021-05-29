@@ -104,7 +104,7 @@ def compress(quantbits, nz, bitswap, gpu):
 
     # <=== MODEL ===>
     model = Model(xs = (3, 32, 32), nz=nz, zchannels=8, nprocessing=4, kernel_size=3, resdepth=8, reswidth=reswidth,
-    in_channels = 3, embedding_dim = 64, num_embeddings = 256).to(device)
+    in_channels = 3, embedding_dim = 32, num_embeddings = 512).to(device)
     model.load_state_dict(
         torch.load(f'model/params/cifar/nz{nz}',
                    map_location=lambda storage, location: storage

@@ -39,5 +39,5 @@ def convert_path_to_npy(*, path='~/train_64x64', outfile='~/train_64x64.npy'):
     np.save(outfile, imgs)
 
 if __name__ == '__main__':
-    convert_path_to_npy(path='data/train_64x64', outfile='data/imagenet64/train/train.npy')
-    convert_path_to_npy(path='data/valid_64x64', outfile='data/imagenet64/test/test.npy')
+    convert_path_to_npy(path='data/imagenet64/train_64x64', outfile='data/imagenet64/train/train.npy')
+    convert_path_to_npy(path='data/imagenet64/valid_64x64', outfile='data/imagenet64/test/test.npy')
