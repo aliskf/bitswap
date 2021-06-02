@@ -3,7 +3,7 @@ import time
 ses = lt.session()
 ses.listen_on(6881, 6891)
 params = {
-'save_path': '/home/ai-lab/ali/torrent',
+'save_path': '/content/torrent',
 'storage_mode': lt.storage_mode_t(2),
 #'paused': False,
 #'auto_managed': True,
