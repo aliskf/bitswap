@@ -69,11 +69,11 @@ class ANS:
 
 def compress(quantbits, nz, bitswap, gpu):
     # model and compression params
-    zdim = 8*16*16
+    zdim = 16*32*32
     zrange = torch.arange(zdim)
     xdim = 64**2 * 3
     xrange = torch.arange(xdim)
-    ansbits = 31 # ANS precision
+    ansbits = 62 # ANS precision
     type = torch.float64 # datatype throughout compression
     device = f"cuda:{gpu}" # gpu
 
@@ -104,7 +104,7 @@ def compress(quantbits, nz, bitswap, gpu):
     decompress = False
 
     # <=== MODEL ===>
-    model = Model(xs = (3, 64, 64), nz=nz, zchannels=16, nprocessing=4, kernel_size=3, resdepth=8, reswidth=reswidth,
+    model = Model(xs = (3, 64, 64), nz=nz, zchannels=16, nprocessing=8, kernel_size=3, resdepth=8, reswidth=reswidth,
     in_channels = 3, embedding_dim = 64, num_embeddings = 512).to(device)
     model.load_state_dict(
         torch.load(f'model/params/imagenet64/nz{nz}',
@@ -128,7 +128,7 @@ def compress(quantbits, nz, bitswap, gpu):
         def __call__(self, pic):
             return pic * 255
     transform_ops = transforms.Compose([transforms.ToTensor(), ToInt()])
-    test_set = modules.ImageNet(root='data/imagenet/test', file='test.npy', transform=transform_ops)
+    test_set = modules.ImageNet(root='data/imagenet64/test', file='test.npy', transform=transform_ops)
 
     # sample (experiments, ndatapoints) from test set with replacement
     if not os.path.exists("bitstreams/imagenet/indices"):
@@ -156,7 +156,7 @@ def compress(quantbits, nz, bitswap, gpu):
         # < ===== COMPRESSION ===>
         # initialize compression
         model.compress()
-        state = list(map(int, np.random.randint(low=1 << 16, high=(1 << 64) - 1, size=10000, dtype=np.uint32))) # fill state list with 'random' bits
+        state = list(map(int, np.random.randint(low=1 << 16, high=(1 << 64) - 1, size=10000, dtype=np.uint64))) # fill state list with 'random' bits
         state[-1] = state[-1] << 64
         initialstate = state.copy()
         restbits = None
@@ -171,7 +171,7 @@ def compress(quantbits, nz, bitswap, gpu):
             with torch.no_grad():
                 model.compress(False)
                 logrecon, logdec, logenc, _ , logvq = model.loss(x.view((-1,) + model.xs))
-                elbo = -logrecon +logvq + torch.sum(-logdec + logenc)
+                elbo = -logrecon -logvq + torch.sum(-logdec + logenc)
                 model.compress(True)
 
             if bitswap:
@@ -197,8 +197,9 @@ def compress(quantbits, nz, bitswap, gpu):
                     # generative model
                     z = zcentres[zi, zrange, zsymtop]
                     #mu, _ = model.vector(zi)(given=mu)
-                    mu, _ = model.vector(zi)(given=z)
-                    mu, scale = model.generate(zi)(given=z)
+                    #mu, _ = model.vector(zi)(given=z)
+                    mu, scale = model.generate(zi)(given=mu)
+                    #mu, _ = model.vector(zi)(given=z)
                     cdfs = logistic_cdf((zendpoints[zi - 1] if zi > 0 else xendpoints).t(), mu, scale).t() # most expensive calculation?
                     pmfs = cdfs[:, 1:] - cdfs[:, :-1]
                     pmfs = torch.cat((cdfs[:,0].unsqueeze(1), pmfs, 1. - cdfs[:,-1].unsqueeze(1)), dim=1)
@@ -299,6 +300,7 @@ def compress(quantbits, nz, bitswap, gpu):
                 for zi in reversed(range(nz)):
                     # generative model
                     z = zcentres[zi, zrange, zsymtop]
+                    #mu, _ = model.vector(zi)(given=z)
                     mu, scale = model.generate(zi)(given=z)
                     #mu, _ = model.vector(zi)(given=mu)
                     cdfs = logistic_cdf((zendpoints[zi - 1] if zi > 0 else xendpoints).t(), mu, scale).t() # most expensive calculation?
@@ -311,9 +313,10 @@ def compress(quantbits, nz, bitswap, gpu):
                     # inference model
                     input = zcentres[zi - 1, zrange, sym] if zi > 0 else xcentres[xrange, sym]
                     
+                    #mu, _ = model.vector(zi)(given=input)
                     mu, scale = model.infer(zi)(given=input)
                     #mu, _ = model.vector(zi)(given=mu)
-                    mu, _ = model.vector(zi)(given=z)
+                    #mu, _ = model.vector(zi)(given=z)
                     cdfs = logistic_cdf(zendpoints[zi].t(), mu, scale).t() # most expensive calculation?
                     pmfs = cdfs[:, 1:] - cdfs[:, :-1]
                     pmfs = torch.cat((cdfs[:, 0].unsqueeze(1), pmfs, 1. - cdfs[:, -1].unsqueeze(1)), dim=1)
